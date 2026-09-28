@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id                String   @id @default(cuid()) @map("id")
+  sku               String   @unique
+  name              String
+  category          String   // Store enums as String: ELECTRONICS, APPAREL, HOME
+  currentPrice      Float
+  stockLevel        Int
+  reorderThreshold  Int
+  demandVelocity    Int      @default(0)
+  status            String   // Store enums as String: ACTIVE, PRICE_REVIEW_PENDING, OUT_OF_STOCK
+  costPrice         Float?   // Nullable for sprint-2
+  marginFloor       Float?   // Nullable for sprint-2
+  supplierId        String?  // Nullable for sprint-2
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  inventorySnapshots   InventorySnapshot[]
+  pricingSuggestions   PricingSuggestion[]
+  reorderSuggestions   ReorderSuggestion[]
+
+  @@map("products")
+}
+
+model InventorySnapshot {
+  id          String   @id @default(cuid()) @map("id")
+  productId   String
+  stockLevel  Int
+  demandVelocity Int
+  price       Float
+  reason      String   // ORDER, STOCK_PATCH, ACCEPT_REORDER, SEED
+  createdAt   DateTime @default(now())
+
+  // Relations
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@map("inventory_snapshots")
+}
+
+model PricingSuggestion {
+  id              String   @id @default(cuid()) @map("id")
+  productId       String
+  currentPrice    Float
+  recommendedPrice Float
+  direction       String   // Store enums as String: INCREASE, DECREASE, HOLD
+  confidence      Float    // 0-1
+  reasoning       String
+  status          String   // Store enums as String: PENDING, ACCEPTED, REJECTED
+  triggerReason   String   // Store enums as String: INITIAL, INVENTORY_LOW, DEMAND_SPIKE, MANUAL
+  source          String   // Store enums as String: AI, RULE, RULE_FALLBACK
+  createdAt       DateTime @default(now())
+  resolvedAt      DateTime?
+
+  // Relations
+  product         Product  @relation(fields: [productId], references: [id])
+
+  @@map("pricing_suggestions")
+}
+
+model ReorderSuggestion {
+  id                    String   @id @default(cuid()) @map("id")
+  productId             String
+  currentStock          Int
+  recommendedQuantity   Int
+  suggestedLeadTimeDays Int?
+  confidence            Float    // 0-1
+  reasoning             String
+  status                String   // Store enums as String: PENDING, ACCEPTED, REJECTED
+  triggerReason         String   // Store enums as String: INITIAL, INVENTORY_LOW, DEMAND_SPIKE, MANUAL
+  source                String   // Store enums as String: AI, RULE, RULE_FALLBACK
+  createdAt             DateTime @default(now())
+  resolvedAt            DateTime?
+
+  // Relations
+  product               Product  @relation(fields: [productId], references: [id])
+
+  @@map("reorder_suggestions")
+}
+
+model AppConfig {
+  key   String @id
+  value String
+
+  @@map("app_config")
+}
