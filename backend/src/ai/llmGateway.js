@@ -27,11 +27,19 @@ export async function callLLM(prompt) {
  */
 async function callGemini(prompt) {
   const model = env.llmModel || 'gemini-1.5-flash';
-  const url = `${env.llmBaseUrl}/v1beta/models/${model}:generateContent?key=${env.llmApiKey}`;
+  const headers = { 'Content-Type': 'application/json' };
+  let url = `${env.llmBaseUrl}/v1beta/models/${model}:generateContent`;
+
+  if (env.llmApiKey.startsWith('AQ.')) {
+    headers['Authorization'] = `Bearer ${env.llmApiKey}`;
+  } else if (env.llmApiKey) {
+    headers['x-goog-api-key'] = env.llmApiKey;
+    url += `?key=${env.llmApiKey}`;
+  }
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     signal: AbortSignal.timeout(env.aiTimeoutMs),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
@@ -107,11 +115,19 @@ export async function callLLMStream(prompt, onChunk) {
  */
 async function callGeminiStream(prompt, onChunk) {
   const model = env.llmModel || 'gemini-1.5-flash';
-  const url = `${env.llmBaseUrl}/v1beta/models/${model}:streamGenerateContent?key=${env.llmApiKey}&alt=sse`;
+  const headers = { 'Content-Type': 'application/json' };
+  let url = `${env.llmBaseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+
+  if (env.llmApiKey.startsWith('AQ.')) {
+    headers['Authorization'] = `Bearer ${env.llmApiKey}`;
+  } else if (env.llmApiKey) {
+    headers['x-goog-api-key'] = env.llmApiKey;
+    url += `&key=${env.llmApiKey}`;
+  }
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     signal: AbortSignal.timeout(env.aiTimeoutMs),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
