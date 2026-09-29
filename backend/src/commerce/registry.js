@@ -1,4 +1,9 @@
+/**
+ * Strategy registry — maps strategy names to instances.
+ * Adding a new strategy = new file + one line here (see CompetitorAwareStrategy sprint-2 seam).
+ */
 import { RuleStrategy } from './ruleStrategy.js';
+import { AiStrategy } from './aiStrategy.js';
 import { assertStrategy } from './CommerceStrategy.js';
 
 // Registry mapping strategy names to strategy instances
@@ -6,11 +11,13 @@ const registry = new Map();
 
 // Register built-in strategies
 const ruleStrategy = new RuleStrategy();
-registry.set(ruleStrategy.name, ruleStrategy);
+const aiStrategy = new AiStrategy();
 
-// Sprint-2 placeholder strategy
-// This demonstrates the extensibility seam
-// To add a new strategy, simply create the class and register it here:
+registry.set(ruleStrategy.name, ruleStrategy);  // 'rule'
+registry.set(aiStrategy.name, aiStrategy);       // 'ai'
+
+// Sprint-2 seam: CompetitorAwareStrategy
+// import { CompetitorAwareStrategy } from './CompetitorAwareStrategy.js';
 // registry.set(new CompetitorAwareStrategy().name, new CompetitorAwareStrategy());
 
 /**
@@ -46,7 +53,8 @@ export function getAvailableStrategies() {
 }
 
 /**
- * Get the active strategy based on configuration
+ * Get the active strategy based on configuration.
+ * Falls back to 'rule' if the configured strategy is not registered.
  * @param {Object} config - The application configuration
  * @param {string} strategyType - The type of strategy ('pricing' or 'reorder')
  * @returns {Object} The active strategy instance
@@ -55,8 +63,7 @@ export function getActive(config, strategyType) {
   const strategyName = config[`${strategyType}Strategy`] || 'rule';
   try {
     return get(strategyName);
-  } catch (error) {
-    // Fallback to rule strategy if configured strategy is not available
+  } catch {
     console.warn(`Strategy '${strategyName}' not found, falling back to 'rule'`);
     return ruleStrategy;
   }

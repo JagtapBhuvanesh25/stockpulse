@@ -1,9 +1,26 @@
+/**
+ * Idempotent seed script — safe to run multiple times.
+ * Clears existing suggestions/snapshots and re-creates from scratch on each run.
+ *
+ * Seed data per docs/seed-and-gateway.md:
+ * - PRD-003: stock 8 < threshold 15 → inventory-low demo product
+ * - PRD-008: velocity 15, peers avg ~7 → demand-spike demo (needs ~7 more orders)
+ * - PRD-003 gets an INITIAL PENDING pricing suggestion → PRICE_REVIEW_PENDING status (per domain-model ADR)
+ */
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // Seed products
+  console.log('🌱 Seeding database...');
+
+  // Clear in correct dependency order
+  await prisma.pricingSuggestion.deleteMany();
+  await prisma.reorderSuggestion.deleteMany();
+  await prisma.inventorySnapshot.deleteMany();
+  await prisma.product.deleteMany();
+
+  // ── Products ──────────────────────────────────────────────────────────────
   const products = [
     {
       id: 'PRD-001',
@@ -33,10 +50,10 @@ async function main() {
       name: 'Organic Cotton T-Shirt',
       category: 'APPAREL',
       currentPrice: 24.99,
-      stockLevel: 8,
+      stockLevel: 8,       // < threshold 15 → INVENTORY_LOW demo
       reorderThreshold: 15,
       demandVelocity: 12,
-      status: 'PRICE_REVIEW_PENDING', // Already low (8 < 15)
+      status: 'PRICE_REVIEW_PENDING', // set by INITIAL suggestion below
     },
     {
       id: 'PRD-004',
@@ -66,7 +83,7 @@ async function main() {
       name: 'LED Desk Lamp — Dimmable',
       category: 'HOME',
       currentPrice: 59.99,
-      stockLevel: 0,
+      stockLevel: 0,       // OUT_OF_STOCK
       reorderThreshold: 15,
       demandVelocity: 0,
       status: 'OUT_OF_STOCK',
@@ -90,20 +107,14 @@ async function main() {
       currentPrice: 54.99,
       stockLevel: 11,
       reorderThreshold: 12,
-      demandVelocity: 15,
+      demandVelocity: 15,  // peer avg (PRD-003: 12, PRD-004: 2) = 7 → 3× = 21; 7 more orders → spike
       status: 'ACTIVE',
     },
   ];
 
-  // Upsert products
   for (const product of products) {
-    await prisma.product.upsert({
-      where: { id: product.id },
-      update: {},
-      create: product,
-    });
-    
-    // Create initial inventory snapshot for each product
+    await prisma.product.create({ data: product });
+
     await prisma.inventorySnapshot.create({
       data: {
         productId: product.id,
@@ -115,54 +126,59 @@ async function main() {
     });
   }
 
-  // Create initial pending suggestion for PRD-003 to match its PRICE_REVIEW_PENDING status
+  // ── INITIAL pending suggestion for PRD-003 ────────────────────────────────
+  // Justifies PRICE_REVIEW_PENDING status per domain-model.md decision
   await prisma.pricingSuggestion.create({
     data: {
       productId: 'PRD-003',
       currentPrice: 24.99,
-      recommendedPrice: 27.49, // 10% increase
+      recommendedPrice: 27.49,  // +10% for low inventory
       direction: 'INCREASE',
-      confidence: 0.8,
-      reasoning: 'Initial seed suggestion for low inventory product',
+      confidence: 0.80,
+      reasoning: 'Stock (8 units) is below reorder threshold (15 units). Recommend a 10% price increase to slow sell-through while replenishment is arranged. Demand velocity (12/day) is healthy relative to category peers.',
       status: 'PENDING',
       triggerReason: 'INITIAL',
       source: 'RULE',
     },
   });
 
-  // Seed AppConfig
-  await prisma.appConfig.upsert({
-    where: { key: 'pricingStrategy' },
-    update: {},
-    create: { key: 'pricingStrategy', value: 'rule' },
+  // INITIAL reorder suggestion for PRD-003 as well
+  await prisma.reorderSuggestion.create({
+    data: {
+      productId: 'PRD-003',
+      currentStock: 8,
+      recommendedQuantity: 37,  // max(1, 15*3 − 8) = 37
+      suggestedLeadTimeDays: 7,
+      confidence: 0.80,
+      reasoning: 'Current stock (8) is below target buffer (45 = threshold × 3). Recommending reorder of 37 units to restore buffer stock. At current velocity of 12/day, stock will run out in ~0.7 days.',
+      status: 'PENDING',
+      triggerReason: 'INITIAL',
+      source: 'RULE',
+    },
   });
 
-  await prisma.appConfig.upsert({
-    where: { key: 'reorderStrategy' },
-    update: {},
-    create: { key: 'reorderStrategy', value: 'rule' },
-  });
+  // ── AppConfig ─────────────────────────────────────────────────────────────
+  const configs = [
+    { key: 'pricingStrategy', value: 'rule' },
+    { key: 'reorderStrategy', value: 'rule' },
+    { key: 'spikeMultiplier', value: '3' },
+    { key: 'aiTimeoutMs', value: '8000' },
+  ];
 
-  await prisma.appConfig.upsert({
-    where: { key: 'spikeMultiplier' },
-    update: {},
-    create: { key: 'spikeMultiplier', value: '3' },
-  });
+  for (const cfg of configs) {
+    await prisma.appConfig.upsert({
+      where: { key: cfg.key },
+      update: { value: cfg.value },
+      create: cfg,
+    });
+  }
 
-  await prisma.appConfig.upsert({
-    where: { key: 'aiTimeoutMs' },
-    update: {},
-    create: { key: 'aiTimeoutMs', value: '8000' },
-  });
-
-  console.log('Seed data loaded successfully');
+  console.log(`✅ Seeded ${products.length} products, 1 INITIAL pricing suggestion (PRD-003), AppConfig`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('❌ Seed failed:', e);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .finally(() => prisma.$disconnect());

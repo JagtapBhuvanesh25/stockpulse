@@ -1,12 +1,10 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { ApiProvider } from './api/client'
-import Console from './pages/Console'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import Console from './pages/Console.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ApiProvider>
-      <Console />
-    </ApiProvider>
-  </React.StrictMode>,
-)
+    <Console />
+  </React.StrictMode>
+);

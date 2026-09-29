@@ -1,80 +1,64 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+/**
+ * API client — thin fetch wrappers for all backend endpoints.
+ * Each function returns the response JSON directly.
+ * On non-2xx responses, throws an Error with the server error message.
+ */
 
-const ApiContext = createContext();
+const BASE = 'http://localhost:4000';
 
-export function ApiProvider({ children }) {
-  const baseUrl = 'http://localhost:4000';
-  
-  const api = {
-    // Health check
-    getHealth: () => fetch(`${baseUrl}/health`).then(res => res.json()),
-    
-    // Products
-    getProducts: (filters = {}) => {
-      const params = new URLSearchParams(filters);
-      return fetch(`${baseUrl}/products?${params}`).then(res => res.json());
-    },
-    
-    getProduct: (id) => fetch(`${baseUrl}/products/${id}`).then(res => res.json()),
-    
-    createProduct: (product) => fetch(`${baseUrl}/products`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(product)
-    }).then(res => res.json()),
-    
-    updateStock: (id, data) => fetch(`${baseUrl}/products/${id}/stock`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
-    
-    placeOrder: (id, data) => fetch(`${baseUrl}/products/${id}/orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
-    
-    // Suggestions
-    getPricingSuggestions: (filters = {}) => {
-      const params = new URLSearchParams(filters);
-      return fetch(`${baseUrl}/pricing-suggestions?${params}`).then(res => res.json());
-    },
-    
-    getReorderSuggestions: (filters = {}) => {
-      const params = new URLSearchParams(filters);
-      return fetch(`${baseUrl}/reorder-suggestions?${params}`).then(res => res.json());
-    },
-    
-    updatePricingSuggestion: (id, data) => fetch(`${baseUrl}/pricing-suggestions/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
-    
-    updateReorderSuggestion: (id, data) => fetch(`${baseUrl}/reorder-suggestions/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
-    
-    // Config
-    getConfig: () => fetch(`${baseUrl}/config`).then(res => res.json()),
-    
-    updateConfig: (data) => fetch(`${baseUrl}/config`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
+async function request(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
   };
-  
-  return (
-    <ApiContext.Provider value={api}>
-      {children}
-    </ApiContext.Provider>
-  );
+  if (body !== undefined) opts.body = JSON.stringify(body);
+
+  const res = await fetch(`${BASE}${path}`, opts);
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `HTTP ${res.status}`);
+  }
+  return data;
 }
 
-export function useApi() {
-  return useContext(ApiContext);
-}
+const get  = (path)         => request('GET',   path);
+const post = (path, body)   => request('POST',  path, body);
+const patch = (path, body)  => request('PATCH', path, body);
+const put  = (path, body)   => request('PUT',   path, body);
+
+// ── Products ─────────────────────────────────────────────────────
+export const api = {
+  getHealth: ()              => get('/health'),
+  getProducts: (filters = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(filters).filter(([,v]) => v))
+    ).toString();
+    return get(`/products${qs ? `?${qs}` : ''}`);
+  },
+  getProduct:  (id)          => get(`/products/${id}`),
+  createProduct: (data)      => post('/products', data),
+  updateStock: (id, data)    => patch(`/products/${id}/stock`, data),
+  placeOrder:  (id, qty)     => post(`/products/${id}/orders`, { quantity: qty }),
+  suggestPricing:  (id)      => post(`/products/${id}/suggest-pricing`),
+  suggestReorder:  (id)      => post(`/products/${id}/suggest-reorder`),
+  getSnapshots: (id)         => get(`/products/${id}/snapshots`),
+
+  // ── Suggestions ──────────────────────────────────────────────
+  getPricingSuggestions:  (f = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([,v]) => v))).toString();
+    return get(`/pricing-suggestions${qs ? `?${qs}` : ''}`);
+  },
+  getReorderSuggestions:  (f = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([,v]) => v))).toString();
+    return get(`/reorder-suggestions${qs ? `?${qs}` : ''}`);
+  },
+  acceptPricing:  (id) => patch(`/pricing-suggestions/${id}`, { status: 'ACCEPTED' }),
+  rejectPricing:  (id) => patch(`/pricing-suggestions/${id}`, { status: 'REJECTED' }),
+  acceptReorder:  (id) => patch(`/reorder-suggestions/${id}`, { status: 'ACCEPTED' }),
+  rejectReorder:  (id) => patch(`/reorder-suggestions/${id}`, { status: 'REJECTED' }),
+
+  // ── Config ────────────────────────────────────────────────────
+  getConfig:    ()     => get('/config'),
+  updateConfig: (data) => put('/config', data),
+};

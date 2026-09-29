@@ -1,44 +1,47 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-function usePolling(fetchFn, interval = 5000) {
-  const [data, setData] = useState(null);
+/**
+ * Polling hook — calls `fn` immediately and then every `intervalMs`.
+ * Stops when component unmounts.
+ * Returns { data, loading, error, refresh }.
+ */
+export function usePolling(fn, intervalMs = 3000) {
+  const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError]     = useState(null);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await fnRef.current();
+      setData(result);
+      setError(null);
+    } catch (e) {
+      setError(e.message || 'Error fetching data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    let timeoutId;
+    let cancelled = false;
+    let timerId;
 
-    const fetchData = async () => {
-      try {
-        const result = await fetchFn();
-        if (isMounted) {
-          setData(result);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err);
-          setLoading(false);
-        }
+    const tick = async () => {
+      if (cancelled) return;
+      await refresh();
+      if (!cancelled) {
+        timerId = setTimeout(tick, intervalMs);
       }
     };
 
-    const scheduleNext = () => {
-      timeoutId = setTimeout(() => {
-        fetchData().then(scheduleNext);
-      }, interval);
-    };
-
-    fetchData().then(scheduleNext);
-
+    tick();
     return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
+      cancelled = true;
+      clearTimeout(timerId);
     };
-  }, [fetchFn, interval]);
+  }, [intervalMs, refresh]);
 
-  return { data, loading, error, refetch: () => {} };
+  return { data, loading, error, refresh };
 }
-
-export { usePolling };

@@ -1,70 +1,186 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { TriggerBadge, SourceBadge } from './Badge.jsx';
+import { api } from '../api/client.js';
 
-const SuggestionCard = ({ suggestion, type, onAccept, onReject }) => {
-  const isPricing = type === 'pricing';
-  
+function ConfidenceBar({ confidence }) {
+  const pct = Math.round(confidence * 100);
   return (
-    <div className="border rounded-lg p-4 mb-4 bg-white shadow-sm">
-      <div className="flex justify-between items-start mb-2">
-        <h3 className="font-semibold">
-          {isPricing ? 'Price Adjustment' : 'Reorder Recommendation'}
-        </h3>
-        <span className={`px-2 py-1 rounded text-xs font-medium ${
-          suggestion.triggerReason === 'INVENTORY_LOW' ? 'bg-orange-100 text-orange-800' :
-          suggestion.triggerReason === 'DEMAND_SPIKE' ? 'bg-purple-100 text-purple-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {suggestion.triggerReason.replace('_', ' ')}
+    <div className="confidence-bar-wrap">
+      <div className="confidence-label">
+        <span>Confidence</span>
+        <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{pct}%</span>
+      </div>
+      <div className="confidence-bar">
+        <div className="confidence-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pricing suggestion card — shows price change, direction, confidence, reasoning.
+ * Accept/Reject buttons trigger API calls and optimistic updates.
+ */
+export function PricingSuggestionCard({ suggestion, onAction, toast }) {
+  const [loading, setLoading] = useState(null); // 'accept' | 'reject' | null
+
+  const dir = suggestion.direction;
+  const priceClass = dir === 'INCREASE' ? 'price-increase' : dir === 'DECREASE' ? 'price-decrease' : 'price-hold';
+  const arrow = dir === 'INCREASE' ? '↑' : dir === 'DECREASE' ? '↓' : '→';
+
+  async function handle(action) {
+    if (loading) return;
+    setLoading(action);
+    try {
+      if (action === 'accept') {
+        await api.acceptPricing(suggestion.id);
+        toast(`✅ Price accepted → $${suggestion.recommendedPrice.toFixed(2)}`, 'success');
+      } else {
+        await api.rejectPricing(suggestion.id);
+        toast('❌ Pricing suggestion rejected', 'error');
+      }
+      onAction();
+    } catch (e) {
+      toast(`⚠ ${e.message}`, 'error');
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <div className="suggestion-card type-pricing">
+      <div className="suggestion-header">
+        <div className="suggestion-badges">
+          <TriggerBadge triggerReason={suggestion.triggerReason} />
+          <SourceBadge source={suggestion.source} />
+          <span className="badge badge-pending">💰 Pricing</span>
+        </div>
+        <span className="suggestion-type-icon">💰</span>
+      </div>
+
+      <div className="suggestion-price-row">
+        <span className="price-current">${suggestion.currentPrice.toFixed(2)}</span>
+        <span className="price-arrow">{arrow}</span>
+        <span className={`price-recommended ${priceClass}`}>
+          ${suggestion.recommendedPrice.toFixed(2)}
+        </span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          ({dir === 'HOLD' ? '±0%' :
+            `${dir === 'INCREASE' ? '+' : ''}${(((suggestion.recommendedPrice - suggestion.currentPrice) / suggestion.currentPrice) * 100).toFixed(1)}%`
+          })
         </span>
       </div>
-      
-      <div className="mb-3">
-        <p className="text-sm text-gray-600 mb-2">{suggestion.reasoning}</p>
-        
-        {isPricing ? (
-          <div>
-            <p className="text-lg font-medium">
-              ${suggestion.currentPrice.toFixed(2)} → ${suggestion.recommendedPrice.toFixed(2)}
-              <span className={`ml-2 px-2 py-1 rounded text-xs ${
-                suggestion.direction === 'INCREASE' ? 'bg-green-100 text-green-800' :
-                suggestion.direction === 'DECREASE' ? 'bg-red-100 text-red-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
-                {suggestion.direction}
-              </span>
-            </p>
-            <p className="text-sm text-gray-500">
-              Confidence: {(suggestion.confidence * 100).toFixed(0)}%
-            </p>
-          </div>
-        ) : (
-          <div>
-            <p className="text-lg font-medium">
-              Reorder {suggestion.recommendedQuantity} units
-            </p>
-            <p className="text-sm text-gray-500">
-              Confidence: {(suggestion.confidence * 100).toFixed(0)}%
-            </p>
-          </div>
-        )}
+
+      <ConfidenceBar confidence={suggestion.confidence} />
+
+      <div className="reasoning-box">
+        {suggestion.reasoning}
       </div>
-      
-      <div className="flex space-x-2">
+
+      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.875rem' }}>
+        {new Date(suggestion.createdAt).toLocaleString()}
+      </div>
+
+      <div className="suggestion-actions">
         <button
-          onClick={() => onAccept(suggestion.id)}
-          className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+          id={`btn-accept-pricing-${suggestion.id}`}
+          className="btn btn-success btn-sm"
+          onClick={() => handle('accept')}
+          disabled={!!loading}
         >
-          Accept
+          {loading === 'accept' ? '…' : '✓ Accept'}
         </button>
         <button
-          onClick={() => onReject(suggestion.id)}
-          className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+          id={`btn-reject-pricing-${suggestion.id}`}
+          className="btn btn-danger btn-sm"
+          onClick={() => handle('reject')}
+          disabled={!!loading}
         >
-          Reject
+          {loading === 'reject' ? '…' : '✕ Reject'}
         </button>
       </div>
     </div>
   );
-};
+}
 
-export default SuggestionCard;
+/**
+ * Reorder suggestion card — shows recommended quantity, lead time, confidence, reasoning.
+ */
+export function ReorderSuggestionCard({ suggestion, onAction, toast }) {
+  const [loading, setLoading] = useState(null);
+
+  async function handle(action) {
+    if (loading) return;
+    setLoading(action);
+    try {
+      if (action === 'accept') {
+        await api.acceptReorder(suggestion.id);
+        toast(`✅ Reorder accepted — +${suggestion.recommendedQuantity} units incoming`, 'success');
+      } else {
+        await api.rejectReorder(suggestion.id);
+        toast('❌ Reorder suggestion rejected', 'error');
+      }
+      onAction();
+    } catch (e) {
+      toast(`⚠ ${e.message}`, 'error');
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <div className="suggestion-card type-reorder">
+      <div className="suggestion-header">
+        <div className="suggestion-badges">
+          <TriggerBadge triggerReason={suggestion.triggerReason} />
+          <SourceBadge source={suggestion.source} />
+          <span className="badge badge-pending" style={{ background: 'rgba(167,139,250,0.15)', color: 'var(--accent-purple)', borderColor: 'rgba(167,139,250,0.3)' }}>📦 Reorder</span>
+        </div>
+        <span className="suggestion-type-icon">📦</span>
+      </div>
+
+      <div className="suggestion-qty">
+        +{suggestion.recommendedQuantity} units
+      </div>
+
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+        <span style={{ color: 'var(--text-muted)' }}>Current stock: </span>
+        <strong>{suggestion.currentStock}</strong>
+        {suggestion.suggestedLeadTimeDays && (
+          <span style={{ marginLeft: '0.75rem', color: 'var(--text-muted)' }}>
+            Lead time: <strong>{suggestion.suggestedLeadTimeDays}d</strong>
+          </span>
+        )}
+      </div>
+
+      <ConfidenceBar confidence={suggestion.confidence} />
+
+      <div className="reasoning-box">
+        {suggestion.reasoning}
+      </div>
+
+      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.875rem' }}>
+        {new Date(suggestion.createdAt).toLocaleString()}
+      </div>
+
+      <div className="suggestion-actions">
+        <button
+          id={`btn-accept-reorder-${suggestion.id}`}
+          className="btn btn-success btn-sm"
+          onClick={() => handle('accept')}
+          disabled={!!loading}
+        >
+          {loading === 'accept' ? '…' : '✓ Accept'}
+        </button>
+        <button
+          id={`btn-reject-reorder-${suggestion.id}`}
+          className="btn btn-danger btn-sm"
+          onClick={() => handle('reject')}
+          disabled={!!loading}
+        >
+          {loading === 'reject' ? '…' : '✕ Reject'}
+        </button>
+      </div>
+    </div>
+  );
+}
