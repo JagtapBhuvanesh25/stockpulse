@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StatusBadge, CategoryBadge } from './Badge.jsx';
+import { PriceSparkline, StockSparkline } from './Sparkline.jsx';
 import { api } from '../api/client.js';
+import StreamPanel from './StreamPanel.jsx';
 
 const CAT_COLORS = {
   ELECTRONICS: 'var(--accent-blue)',
@@ -8,113 +10,295 @@ const CAT_COLORS = {
   HOME:        'var(--accent-cyan)',
 };
 
+// ── Stock Bar ─────────────────────────────────────────────────────────────────
+
 function StockBar({ stock, threshold }) {
-  const pct = threshold > 0 ? Math.min(100, (stock / (threshold * 3)) * 100) : 100;
+  const cap = threshold * 3 || 60;
+  const pct = Math.min(100, (stock / cap) * 100);
   const level = pct > 60 ? 'high' : pct > 25 ? 'medium' : 'low';
   return (
-    <div className="stock-mini">
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
       <div className="stock-bar">
         <div className={`stock-fill ${level}`} style={{ width: `${pct}%` }} />
       </div>
-      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{stock}</span>
+      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{stock}</span>
     </div>
   );
 }
 
-function SimulatePanel({ product, onAction, toast }) {
-  const [qty, setQty] = useState(1);
-  const [stockDelta, setStockDelta] = useState(10);
-  const [loading, setLoading] = useState(false);
+// ── Simulate Panel ────────────────────────────────────────────────────────────
+
+function SimulatePanel({ product, onAction, toast, onRefreshAll }) {
+  const [qty, setQty]           = useState(1);
+  const [delta, setDelta]       = useState(10);
+  const [loading, setLoading]   = useState('');
+  const [showStream, setShowStream] = useState(false);
 
   async function handleOrder() {
     if (loading) return;
-    setLoading(true);
+    setLoading('order');
     try {
       await api.placeOrder(product.id, qty);
-      toast(`✅ Placed order of ${qty} unit(s) for ${product.name}`, 'success');
+      toast(`✅ Sold ${qty}× ${product.name}`, 'success');
       onAction();
-    } catch (e) {
-      toast(`❌ ${e.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { toast(`❌ ${e.message}`, 'error'); }
+    finally { setLoading(''); }
   }
 
-  async function handleStockUpdate() {
+  async function handleStockPatch() {
     if (loading) return;
-    setLoading(true);
+    setLoading('stock');
     try {
-      await api.updateStock(product.id, { delta: Number(stockDelta) });
-      toast(`✅ Stock updated by ${stockDelta > 0 ? '+' : ''}${stockDelta}`, 'success');
+      await api.updateStock(product.id, { delta: Number(delta) });
+      toast(`✅ Stock ${delta > 0 ? '+' : ''}${delta}`, 'success');
       onAction();
-    } catch (e) {
-      toast(`❌ ${e.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { toast(`❌ ${e.message}`, 'error'); }
+    finally { setLoading(''); }
+  }
+
+  async function handleManualSuggest(type) {
+    if (loading) return;
+    setLoading(type);
+    try {
+      if (type === 'pricing') await api.suggestPricing(product.id);
+      else                    await api.suggestReorder(product.id);
+      toast(`✅ Manual ${type} suggestion created`, 'success');
+      onAction();
+    } catch (e) { toast(`❌ ${e.message}`, 'error'); }
+    finally { setLoading(''); }
   }
 
   return (
-    <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid var(--border)' }}>
-      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>
-        Simulate
-      </div>
-      <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-        <div className="flex gap-2 items-center">
+    <div style={{ padding: '1rem 1.25rem', background: 'rgba(0,0,0,0.18)', borderTop: '1px solid var(--border)' }}>
+      {/* Row 1: Simulate controls */}
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', width: '100%', marginBottom: '0.25rem' }}>
+          Simulate Signals
+        </div>
+
+        {/* Sale order */}
+        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
           <input
-            type="number"
-            id={`order-qty-${product.id}`}
-            className="input simulate-qty-input"
+            id={`sale-qty-${product.id}`}
+            type="number" min={1} max={product.stockLevel || 999}
             value={qty}
-            min={1}
-            max={product.stockLevel}
             onChange={e => setQty(Math.max(1, Number(e.target.value)))}
+            className="input"
+            style={{ width: 64 }}
           />
           <button
-            id={`btn-order-${product.id}`}
+            id={`btn-sale-${product.id}`}
             className="btn btn-sm btn-danger"
             onClick={handleOrder}
-            disabled={loading || product.stockLevel < 1}
-            title="Simulate a sale order"
+            disabled={!!loading || product.stockLevel < 1}
+            title="Simulate a customer sale (decrements stock + velocity)"
           >
-            {loading ? '…' : '🛒 Sale'}
+            {loading === 'order' ? '…' : '🛒 Sale'}
           </button>
         </div>
-        <div className="flex gap-2 items-center">
+
+        {/* Stock delta */}
+        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
           <input
-            type="number"
             id={`stock-delta-${product.id}`}
-            className="input simulate-qty-input"
-            value={stockDelta}
-            onChange={e => setStockDelta(Number(e.target.value))}
-            placeholder="±Δ"
+            type="number"
+            value={delta}
+            onChange={e => setDelta(Number(e.target.value))}
+            className="input"
+            style={{ width: 64 }}
+            title="Positive = add stock, Negative = remove stock"
           />
           <button
-            id={`btn-stock-${product.id}`}
+            id={`btn-patch-${product.id}`}
             className="btn btn-sm btn-ghost"
-            onClick={handleStockUpdate}
-            disabled={loading}
-            title="Adjust stock level"
+            onClick={handleStockPatch}
+            disabled={!!loading}
           >
-            📦 Stock Δ
+            {loading === 'stock' ? '…' : '📦 Stock Δ'}
           </button>
         </div>
+
+        {/* Manual suggest */}
+        <button
+          id={`btn-manual-pricing-${product.id}`}
+          className="btn btn-sm btn-ghost"
+          onClick={() => handleManualSuggest('pricing')}
+          disabled={!!loading}
+          title="Trigger a manual pricing suggestion immediately"
+        >
+          {loading === 'pricing' ? '…' : '💰 Suggest Price'}
+        </button>
+        <button
+          id={`btn-manual-reorder-${product.id}`}
+          className="btn btn-sm btn-ghost"
+          onClick={() => handleManualSuggest('reorder')}
+          disabled={!!loading}
+          title="Trigger a manual reorder suggestion immediately"
+        >
+          {loading === 'reorder' ? '…' : '📦 Suggest Reorder'}
+        </button>
+
+        {/* SSE stream toggle */}
+        <button
+          id={`btn-stream-toggle-${product.id}`}
+          className="btn btn-sm btn-ghost"
+          onClick={() => setShowStream(s => !s)}
+          title="Show AI streaming reasoning panel"
+          style={{ color: showStream ? 'var(--accent-blue)' : undefined }}
+        >
+          ✦ {showStream ? 'Hide' : 'AI Stream'}
+        </button>
       </div>
+
+      {/* SSE streaming panel */}
+      {showStream && (
+        <StreamPanel
+          product={product}
+          onSuggestionCreated={onAction}
+          toast={toast}
+        />
+      )}
     </div>
   );
 }
 
-/**
- * Product table — shows all products with stock, price, velocity, status.
- * Each row has an inline simulate panel (FR-31).
- */
+// ── Product Row ───────────────────────────────────────────────────────────────
+
+function ProductRow({ product, isExpanded, onToggle, onAction, toast }) {
+  const [snapshots, setSnapshots] = useState([]);
+  const isLow    = product.stockLevel < product.reorderThreshold;
+  const hasPending = product.pendingPricingCount > 0 || product.pendingReorderCount > 0;
+  const isNew  = useRef(false);
+
+  useEffect(() => {
+    if (isExpanded && snapshots.length === 0) {
+      api.getSnapshots(product.id)
+        .then(setSnapshots)
+        .catch(() => {});
+    }
+  }, [isExpanded, product.id]);
+
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        style={{
+          cursor: 'pointer',
+          borderLeft: isLow ? '3px solid var(--accent-red)' : hasPending ? '3px solid var(--accent-amber)' : '3px solid transparent',
+          transition: 'border-color 0.3s',
+        }}
+      >
+        {/* Product name */}
+        <td>
+          <div className="product-name">{product.name}</div>
+          <div className="product-sku">{product.sku}</div>
+        </td>
+
+        {/* Category */}
+        <td><CategoryBadge category={product.category} /></td>
+
+        {/* Price */}
+        <td>
+          <div className="price-tag">${product.currentPrice.toFixed(2)}</div>
+        </td>
+
+        {/* Stock + bar */}
+        <td>
+          <StockBar stock={product.stockLevel} threshold={product.reorderThreshold} />
+          {isLow && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--accent-red)', fontWeight: 600, marginTop: 2 }}>
+              ↓ below threshold ({product.reorderThreshold})
+            </div>
+          )}
+        </td>
+
+        {/* Velocity */}
+        <td>
+          <span className="velocity-chip">⚡ {product.demandVelocity}/day</span>
+        </td>
+
+        {/* Status */}
+        <td><StatusBadge status={product.status} /></td>
+
+        {/* Pending */}
+        <td onClick={e => e.stopPropagation()}>
+          {hasPending ? (
+            <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+              {product.pendingPricingCount > 0 && (
+                <span className="badge badge-pending">💰 {product.pendingPricingCount}</span>
+              )}
+              {product.pendingReorderCount > 0 && (
+                <span className="badge badge-pending" style={{ background: 'rgba(167,139,250,0.15)', color: 'var(--accent-purple)', borderColor: 'rgba(167,139,250,0.3)' }}>
+                  📦 {product.pendingReorderCount}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+          )}
+        </td>
+
+        {/* Expand */}
+        <td onClick={e => e.stopPropagation()}>
+          <button
+            id={`btn-expand-${product.id}`}
+            className="btn btn-sm btn-ghost"
+            onClick={onToggle}
+          >
+            {isExpanded ? '▲' : '▼'}
+          </button>
+        </td>
+      </tr>
+
+      {/* Expanded panel */}
+      {isExpanded && (
+        <tr>
+          <td colSpan={8} style={{ padding: 0, background: 'rgba(0,0,0,0.12)' }}>
+            {/* Sparklines row */}
+            {snapshots.length > 1 && (
+              <div style={{
+                display: 'flex', gap: '2rem', padding: '0.875rem 1.25rem',
+                borderBottom: '1px solid var(--border)', flexWrap: 'wrap',
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Price History
+                  </div>
+                  <PriceSparkline snapshots={snapshots.slice(0, 20)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Stock History
+                  </div>
+                  <StockSparkline snapshots={snapshots.slice(0, 20)} threshold={product.reorderThreshold} />
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', alignSelf: 'flex-end' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Events: </span>{snapshots.length}
+                  {product.costPrice && (
+                    <span style={{ marginLeft: '1rem' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Cost: </span>${product.costPrice.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            <SimulatePanel product={product} onAction={onAction} toast={toast} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// ── Product Table ─────────────────────────────────────────────────────────────
+
 export default function ProductTable({ products, onAction, toast, expandedId, setExpandedId }) {
   if (!products || products.length === 0) {
     return (
       <div className="empty-state">
         <div className="empty-icon">📦</div>
         <div className="empty-title">No products found</div>
-        <div className="empty-desc">Products will appear here once seeded</div>
+        <div className="empty-desc">Try clearing filters or check that the database is seeded</div>
       </div>
     );
   }
@@ -124,85 +308,27 @@ export default function ProductTable({ products, onAction, toast, expandedId, se
       <table>
         <thead>
           <tr>
-            <th>Product</th>
+            <th>Product / SKU</th>
             <th>Category</th>
             <th>Price</th>
             <th>Stock</th>
-            <th>Velocity/24h</th>
+            <th>Velocity</th>
             <th>Status</th>
             <th>Pending</th>
-            <th>Actions</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          {products.map(p => {
-            const isExpanded = expandedId === p.id;
-            const catColor = CAT_COLORS[p.category] || 'var(--text-muted)';
-            const isLow = p.stockLevel < p.reorderThreshold;
-            const hasPending = p.pendingPricingCount > 0 || p.pendingReorderCount > 0;
-
-            return (
-              <React.Fragment key={p.id}>
-                <tr
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setExpandedId(isExpanded ? null : p.id)}
-                >
-                  <td>
-                    <div className="product-name">{p.name}</div>
-                    <div className="product-sku">{p.sku}</div>
-                  </td>
-                  <td><CategoryBadge category={p.category} /></td>
-                  <td>
-                    <span className="price-tag">${p.currentPrice.toFixed(2)}</span>
-                  </td>
-                  <td>
-                    <StockBar stock={p.stockLevel} threshold={p.reorderThreshold} />
-                    {isLow && (
-                      <div style={{ fontSize: '0.68rem', color: 'var(--accent-red)', marginTop: '2px', fontWeight: 600 }}>
-                        ↓ below {p.reorderThreshold} threshold
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <span className="velocity-chip">
-                      ⚡ {p.demandVelocity}/day
-                    </span>
-                  </td>
-                  <td><StatusBadge status={p.status} /></td>
-                  <td>
-                    {hasPending ? (
-                      <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
-                        {p.pendingPricingCount > 0 && (
-                          <span className="badge badge-pending">💰 {p.pendingPricingCount}</span>
-                        )}
-                        {p.pendingReorderCount > 0 && (
-                          <span className="badge badge-pending">📦 {p.pendingReorderCount}</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
-                    )}
-                  </td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => setExpandedId(isExpanded ? null : p.id)}
-                      id={`btn-expand-${p.id}`}
-                    >
-                      {isExpanded ? '▲ Hide' : '▼ Simulate'}
-                    </button>
-                  </td>
-                </tr>
-                {isExpanded && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: 0, background: 'rgba(0,0,0,0.15)' }}>
-                      <SimulatePanel product={p} onAction={onAction} toast={toast} />
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            );
-          })}
+          {products.map(p => (
+            <ProductRow
+              key={p.id}
+              product={p}
+              isExpanded={expandedId === p.id}
+              onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+              onAction={onAction}
+              toast={toast}
+            />
+          ))}
         </tbody>
       </table>
     </div>

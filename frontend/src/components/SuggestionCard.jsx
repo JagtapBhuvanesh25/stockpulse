@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TriggerBadge, SourceBadge } from './Badge.jsx';
 import { api } from '../api/client.js';
 
@@ -23,6 +23,8 @@ function ConfidenceBar({ confidence }) {
  */
 export function PricingSuggestionCard({ suggestion, onAction, toast }) {
   const [loading, setLoading] = useState(null); // 'accept' | 'reject' | null
+  const [flash, setFlash] = useState(true);
+  useEffect(() => { const t = setTimeout(() => setFlash(false), 1600); return () => clearTimeout(t); }, []);
 
   const dir = suggestion.direction;
   const priceClass = dir === 'INCREASE' ? 'price-increase' : dir === 'DECREASE' ? 'price-decrease' : 'price-hold';
@@ -48,7 +50,7 @@ export function PricingSuggestionCard({ suggestion, onAction, toast }) {
   }
 
   return (
-    <div className="suggestion-card type-pricing">
+    <div className={`suggestion-card type-pricing${flash ? ' flash-new' : ''}`}>
       <div className="suggestion-header">
         <div className="suggestion-badges">
           <TriggerBadge triggerReason={suggestion.triggerReason} />
@@ -108,6 +110,12 @@ export function PricingSuggestionCard({ suggestion, onAction, toast }) {
  */
 export function ReorderSuggestionCard({ suggestion, onAction, toast }) {
   const [loading, setLoading] = useState(null);
+  const [flash, setFlash] = useState(true);
+
+  useEffect(() => {
+    const t = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(t);
+  }, []);
 
   async function handle(action) {
     if (loading) return;
@@ -129,7 +137,7 @@ export function ReorderSuggestionCard({ suggestion, onAction, toast }) {
   }
 
   return (
-    <div className="suggestion-card type-reorder">
+    <div className={`suggestion-card type-reorder${flash ? ' flash-new' : ''}`}>
       <div className="suggestion-header">
         <div className="suggestion-badges">
           <TriggerBadge triggerReason={suggestion.triggerReason} />

@@ -738,6 +738,19 @@ select.input {
   to   { transform: translateX(0);   opacity: 1; }
 }
 
+/* ── New suggestion flash ────────────────────────────────────── */
+@keyframes flash-new {
+  0%   { box-shadow: 0 0 0 0 rgba(79,142,247,0); border-color: var(--border); }
+  30%  { box-shadow: 0 0 20px 4px rgba(79,142,247,0.5); border-color: var(--accent-blue); }
+  100% { box-shadow: 0 0 0 0 rgba(79,142,247,0); border-color: var(--border); }
+}
+.suggestion-card.flash-new {
+  animation: flash-new 1.5s ease forwards;
+}
+
+/* ── mb-4 ────────────────────────────────────────────────────── */
+.mb-4 { margin-bottom: 1rem; }
+
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .main-content { padding: 1rem; }

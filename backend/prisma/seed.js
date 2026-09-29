@@ -105,9 +105,9 @@ async function main() {
       name: 'Hoodie — Heather Grey',
       category: 'APPAREL',
       currentPrice: 54.99,
-      stockLevel: 11,
+      stockLevel: 40,      // enough stock for spike demo (40 > 12 threshold)
       reorderThreshold: 12,
-      demandVelocity: 15,  // peer avg (PRD-003: 12, PRD-004: 2) = 7 → 3× = 21; 7 more orders → spike
+      demandVelocity: 15,  // peer avg (PRD-003: 12, PRD-004: 2) = 7 → spike threshold 3×7=21; 7 more orders trigger
       status: 'ACTIVE',
     },
   ];
