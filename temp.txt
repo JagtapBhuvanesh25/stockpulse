@@ -1,0 +1,5 @@
+cd C:\Users\poweroot\Desktop\Stockpulse\backend
+node src/server.js
+
+cd C:\Users\poweroot\Desktop\Stockpulse\frontend
+npx vite --port 5173
