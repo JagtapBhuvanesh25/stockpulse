@@ -1,3 +1,35 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment variables — NEVER commit
 .env
-*.db
-*node_modules
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Prisma SQLite database
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Build outputs
+dist/
+build/
+
+# Vite
+.vite/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
